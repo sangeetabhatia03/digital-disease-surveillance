@@ -43,7 +43,9 @@ library(ggplot2)
 library(ggthemes)
 library(glue)
 library(janitor)
+library(lubridate)
 library(purrr)
+library(readr)
 library(scales)
 library(tidyr)
 ```
@@ -52,7 +54,6 @@ library(tidyr)
 ```{r data-cleanup-2 }
 species <- "Humans"
 disease <- "Ebola"
-
 wafrica <- c("Sierra Leone", "Liberia", "Guinea")
 datasource <- "promed"
 outfile <- glue(
@@ -159,19 +160,43 @@ cum_cases <- map_dfr(
 ## Merge duplicate alerts
 
 ```{r data-cleanup-9 }
-cols.to.keep <- c(
+cols_to_keep <- c(
   "location", "country", "disease", "species",
   "healthmap_alert_id", "headline", "url",
   "alert_tag", "feed_name", "lon", "lat"
 )
 ## These are columns we generate ourselves later on
-cols.to.keep <- c(cols.to.keep, "date", "cases")
+cols_to_keep <- c(cols_to_keep, "date", "cases")
+
 ```
 
 ```{r data-cleanup-10 }
-no_dups <- map(cum_cases, function(df) {
-  mRIIDS:::merge_duplicates(df, cols.to.keep)
-})
+no_dups <- merge_duplicates(cum_cases, cols_to_keep)
+```
+## Compare before and after removal of duplicates
+
+```{r}
+x <- bind_rows(
+  list("Without duplicates" = no_dups[, c("date","country", "cases")],
+       "With duplicates" = cum_cases[, c("date","country", "cases")]),
+  .id = "var"
+)
+p <- ggplot(x, aes(date, cases, col = var)) +
+    geom_point() +
+    facet_wrap(~country, scales = "free_y", ncol = 1) +
+    scale_x_date(date_labels = "%d-%m-%Y") +
+  ylab("Cases")
+
+p <- p + theme_minimal() +
+  theme(
+    panel.border = element_blank(),
+    axis.title.x = element_blank(),
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank(),
+    legend.title = element_blank(),
+    legend.position = "top"
+  )
+p
 ```
 
 ## Remove outliers. 
@@ -206,10 +231,9 @@ no_outliers <- map(no_dups, function(df) {
 
 ```{r data-cleanup-12 }
 
-mono_inc <- map(
-  no_outliers,
-  ~ mRIIDS:::make_monotonically_increasing(.x)
-)
+mono_inc <- split(no_dups, no_dups$country) %>%
+  map(make_monotonically_increasing)
+
 ```
 
 ## Interpolate missing data
@@ -218,9 +242,7 @@ Finally, interpolate missing data.
 ```{r data-cleanup-13 }
 interpolated <- map(
   mono_inc,
-  ~ mRIIDS:::interpolate_missing_data(.x,
-    method = "loglinear"
-  )
+  ~ interpolate_missing_data(., method = "loglinear")
 )
 ```
 
@@ -240,6 +262,7 @@ take the difference.
 
 
 ```{r data-cleanup-15 }
+
 incid_tall <- map_dfr(interpolated, function(x) {
   x <- select(x,
     date = interpolated_date,
@@ -250,25 +273,8 @@ incid_tall <- map_dfr(interpolated, function(x) {
   x <- select(x, date, incid)
   x
 }, .id = "country")
+
 ```
-
-## Manually fix Ghana 
-
-Manually fix the erroneous entry for Ghana on 2014-04-08
-
-
-```{r data-cleanup-16 }
-incid_tall$country <- countrycode::countrycode(
-  incid_tall$country,
-  "country.name",
-  "iso3c"
-)
-
-fix <- which(incid_tall$date == "2014-04-08" &
-  incid_tall$country == "GHA")
-incid_tall$incid[fix] <- 0
-```
-
 
 ## Plot
 
@@ -278,52 +284,41 @@ incid_tall$incid[fix] <- 0
 Common plotting logic. x must have a date and a cases column.
 
 ```{r data-cleanup-17 }
+
 cases_ts <- function(x) {
-  p <- ggplot(x, aes(date, cases)) + geom_point(size = 0.5, col = mriids_plot_theme$color_scale[[params$datasource]])
-  p <- p + mriids_plot_theme$onecol_theme
+  p <- ggplot(x, aes(date, cases)) +
+    geom_point(size = 0.5)
+  p <- p + theme_minimal()
   p <- p + xlab("") + ylab("Cases")
-  p <- p + scale_x_date(labels = mriids_plot_theme$dateformat)
+  p <- p + scale_x_date(date_labels = "%d-%b-%Y")
   p
 }
+
 ```
 
 ```{r data-cleanup-18 }
-total_p <- map(cum_cases, cases_ts)
-total_p <- map(total_p, function(p) {
-    p <- p + theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
-    p
-})
-
+total_p <- cases_ts(cum_cases) +
+  facet_wrap(~country, scales = "free_y", ncol = 1) + 
+  theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
     
 ```
 
 ### Remove duplicate alerts
 
 ```{r data-cleanup-19 }
-nodups_p <- map(no_dups, cases_ts)
-nodups_p <- map(nodups_p, function(p) {
-        p <- p + theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
-        p
-})     
+nodups_p <- cases_ts(no_dups) +
+  facet_wrap(~country, scales = "free_y", ncol = 1) + 
+  theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
+
 ```
-
-## Remove outliers 
-
-```{r data-cleanup-20 }
-nooutss_p <- map(no_outliers, cases_ts)
-nooutss_p <- map(nooutss_p, function(p) {
-        p <- p + theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
-        p
-})      
-```
-
 ### Make increasing
 
 ```{r data-cleanup-21 }
 monoinc_p <- map(mono_inc, cases_ts)
-monoinc_p <- map(monoinc_p, function(p) {
-        p <- p + theme(axis.text.x = element_text(hjust = 0.5))
-        p
+monoinc_p <- map(
+  monoinc_p, function(p) {
+    p <- p + theme(axis.text.x = element_text(hjust = 0.5))
+    p
 })     
 
 ```
@@ -333,28 +328,30 @@ monoinc_p <- map(monoinc_p, function(p) {
 This needs a slightly different viz.
 
 ```{r data-cleanup-22, eval = TRUE}
+
 interp_p <- map(interpolated, function(x) {
-  x$src <- glue("{params$datasource}.FALSE")
+  x$src <- glue("{datasource}.FALSE")
   idx <- which(is.na(x$cases))
-  x$src[idx] <- glue("{params$datasource}.TRUE")
+  x$src[idx] <- glue("{datasource}.TRUE")
   x <- select(x,
     date = interpolated_date,
     cases = interpolated_cases,
     src
   )
   p <- ggplot(x, aes(date, cases, col = src)) + geom_point(size = 0.5)
-  p <- p + scale_color_manual(values = mriids_plot_theme$color_scale)
-  p <- p + mriids_plot_theme$onecol_theme + mriids_plot_theme$legend
-  p <- p + xlab("") + ylab("Cases")
-  p <- p + theme(axis.text.x = element_text(hjust = 0.5))
+  p <- p + xlab("") + ylab("Cases") 
+  p <- p + theme_minimal()
   p <- p + theme(
+    axis.text.x = element_text(hjust = 0.5),
     panel.border = element_blank(),
-    axis.line = element_line()
+    axis.line = element_line(),
+    legend.position = "top"
   )
   p <- p + xlab("") + theme(legend.title = element_blank())
-  p <- p + scale_x_date(labels = mriids_plot_theme$dateformat)
+  p <- p + scale_x_date(date_labels = "%d-%b-%Y")
   p
 })
+
 ```
 ## Daily Incidence Series
 
@@ -362,27 +359,28 @@ interp_p <- map(interpolated, function(x) {
 daily_bycountry <- split(incid_tall, incid_tall$country)
 
 names(daily_bycountry) <- countrycode::countrycode(
-    names(daily_bycountry), "iso3c", "country.name"
+  names(daily_bycountry), "iso3c", "country.name"
 )
 
 daily_p <- map(
     daily_bycountry,
     function(df) {
-
-        p <- ggplot(df, aes(date, incid)) +
-            geom_point(size = 0.5, col = mriids_plot_theme$color_scale[[datasource]])
-        p <- p + mriids_plot_theme$onecol_theme + mriids_plot_theme$legend
-        p <- p + xlab("") + ylab("Daily incidence")
-        p <- p + theme(axis.text.x = element_text(hjust = 0.5))
-        p <- p + theme(
-                     panel.border = element_blank(),
-                     axis.line = element_line()
-                 )
-        p <- p + scale_x_date(labels = mriids_plot_theme$dateformat)
-        p
+      p <- ggplot(df, aes(date, incid)) +
+        geom_point(size = 0.5)
+      p <- p + xlab("") + ylab("Daily incidence")
+      p <- p + theme_minimal()
+      p <- p +
+        theme(
+          axis.text.x = element_text(hjust = 0.5),
+          panel.border = element_blank(),
+          axis.line = element_line()
+        )
+      p <- p + scale_x_date(date_labels = "%d-%b-%Y")
+      p
 
     }    
 )
+
 ```
 Putting them together.
 
@@ -528,7 +526,7 @@ incid_extracols$country <- countrycode::countrycode(
 ```
 
 Reshaping from tall to wide and back to tall allows us to get the same
-dates for all countries. We do this fror both data frames and then 
+dates for all countries. We do this for both data frames and then 
 join the tall forms of both.
 
 ```{r data-cleanup-31}

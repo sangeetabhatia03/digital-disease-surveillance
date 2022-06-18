@@ -1,3 +1,6 @@
+paste_single_col <- function(col_dup) {
+  paste(col_dup, collapse = " / ")
+}
 
 #' Merge duplicated lines from data stream 1
 #'
@@ -92,4 +95,44 @@ merge_dup_lines_DS1 <- function(dat_dup, cols_to_keep, rule = c("median")) {
   }
 
   out
+}
+
+
+##' Duplicate records in the case count are merged according to the
+##' following rules.
+##' Details
+##' @title Merge dulplicate records in the incidence count.
+##' @param case_count
+##' @param cols_to_keep
+##' @param merge_rule
+##' @return duplicates free data frame
+##' @author Sangeeta Bhatia
+##' @export
+merge_duplicates <- function(case_count,
+                             cols_to_keep,
+                             merge_rule=c("median")){
+  ####################################
+  ### identify unique entries based on date and country columns
+  ####################################
+
+  case_count$DateCountry <- paste0(as.character(case_count$date),
+                                   case_count$country)
+  uniq_dat <- unique(case_count$DateCountry)
+
+  ####################################
+  ### merge duplicated entries where necessary
+  ####################################
+
+  cols_to_keep <- cols_to_keep[cols_to_keep %in% names(case_count)]
+  chr_cols <- cols_to_keep[! cols_to_keep %in% c("date", "cases")]
+  ### create a processed dataset ###
+  duplicates_free <- map_dfr(uniq_dat, function(x) {
+      out <- merge_dup_lines_DS1(case_count[which(case_count$DateCountry
+                                                  %in% x), ],
+                                 cols_to_keep,
+                                 rule = merge_rule)
+      out <- mutate_at(out, chr_cols, as.character)
+      out
+  })
+  duplicates_free
 }

@@ -52,12 +52,8 @@ library(tidyr)
 ```{r data-cleanup-2 }
 species <- "Humans"
 disease <- "Ebola"
-case.type <- "scc"
-wafrica <- c(
-  "Sierra Leone", "Liberia",
-  "Guinea", "Senegal",
-  "Ghana", "Mali", "Nigeria"
-)
+
+wafrica <- c("Sierra Leone", "Liberia", "Guinea")
 datasource <- "promed"
 outfile <- glue(
   "{Sys.Date()}_{datasource}_loglinear"
@@ -106,26 +102,21 @@ by_location <- split(feed, feed$country)
 
 ```{r data-cleanup-6 }
 ## Deaths are not used anywhere. No use plotting them
-raw_p <- imap(by_location, function(x, cntry) {
-  x <- select(x, issue_date, sc, cc, country) %>%
-    gather(
-      case_type,
-      count, -c(issue_date, country)
-    )
-  x$issue_date <- as.Date(x$issue_date,
-    format = "%m/%d/%y"
+x <- select(feed, issue_date, sc, cc, country) %>%
+  gather(
+    case_type, count, -c(issue_date, country)
   )
-  p <- ggplot(x,
-    aes(issue_date, count, col = case_type)
-  ) +
+
+x$issue_date <- as.Date(x$issue_date, format = "%m/%d/%y")
+p <- ggplot(x, aes(issue_date, count, col = case_type)) +
     geom_point(size = 1.1) +
-    ylab("Cases") +
+    facet_wrap(~country, scales = "free_y", ncol = 1) +
     scale_x_date(date_labels = "%d-%m-%Y") +
     scale_color_manual(
       values = c(sc = "#00BFC4", cc = "#F8766D"),
       breaks = c("sc", "cc"),
       labels = c("Suspected Cases", "Confirmed Cases")
-    ) + ggtitle(cntry)     
+    ) + ylab("Cases") 
   p <- p + theme_minimal() +
     theme(
       panel.border = element_blank(),
@@ -135,30 +126,12 @@ raw_p <- imap(by_location, function(x, cntry) {
       legend.title = element_blank(),
       legend.position = "top"
     )
-  p
- })
-
+  
+p
 
 ```
 
-## 
 
-```{r data-cleanup-7 }
-ggpubr::ggarrange(plotlist = raw_p, common.legend = TRUE) 
-  ## ggpubr::ggexport(
-  ##   filename = here::here(
-  ##     "figures/",
-  ##     paste0(
-  ##       outfile,
-  ##       "_raw.pdf"
-  ##     )
-  ##   ),
-  ##   res = ,
-  ##   width = mriids_plot_theme$single_col_width,
-  ##   height = mriids_plot_theme$single_col_height,
-    
-  ## )
-```
 # Data clean-up
 
 Extract the total case count as a sum of suspected and
@@ -166,22 +139,21 @@ confirmed cases.
 
 
 ```{r data-cleanup-8 }
+sum_only_na_stays_na <- function(x){
+  if (all(is.na(x))) out <- NA
+  else out <- sum(x, na.rm = TRUE)
+  out
+}
 
-cum_cases <- map(by_location, function(df) {
-  mRIIDS:::update_cases_column(df, case.type)
+cum_cases <- map_dfr(
+  by_location, function(case_count) {
+  case_count$date <- mdy(case_count$issue_date)
+  case_count$cases <- apply(
+    case_count[, c("sc", "cc")], 1, sum_only_na_stays_na
+  )
+  case_count
 })
 
-
-
-
-bind_rows(cum_cases) %>%
-  select(country, date, cases) %>%
-  readr::write_csv(
-    path = here::here(
-      all_files[[datasource]]$outdir,
-      glue("{outfile}_cumulative.csv")
-    )
-  )
 ```
 
 ## Merge duplicate alerts

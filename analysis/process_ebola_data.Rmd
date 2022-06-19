@@ -44,7 +44,7 @@ source(here("R/incidence_data_processing.R"))
 ```
 
 
-```{r data-cleanup-2 }
+```{r process-ebola-data-1 }
 species <- "Humans"
 disease <- "Ebola"
 wafrica <- c("Sierra Leone", "Liberia", "Guinea")
@@ -58,7 +58,7 @@ Visualising the raw data.
 
 
 
-```{r data-cleanup-3 }
+```{r process-ebola-data-2 }
 
 feed <- read.csv(
   here("data/raw/promed_2014-2016-renamed.csv"),
@@ -77,7 +77,7 @@ feed <- rename(feed,
 
 Strip the date of the time stamp
 
-```{r data-cleanup-4 }
+```{r process-ebola-data-3 }
 feed <- separate(
   feed, issue_date,
   sep = " ",
@@ -91,7 +91,7 @@ feed <- separate(
 
 ### Raw data by case category
 
-```{r data-cleanup-6 }
+```{r process-ebola-data-4 }
 ## Deaths are not used anywhere. No use plotting them
 x <- select(feed, issue_date, sc, cc, country) %>%
   gather(
@@ -125,7 +125,7 @@ raw_p <- split(x, x$country) %>%
 # Data clean-up
 
 Split the data by country.
-```{r data-cleanup-5 }
+```{r process-ebola-data-5 }
 by_location <- split(feed, feed$country)
 ```
 
@@ -133,7 +133,7 @@ Extract the total case count as a sum of suspected and
 confirmed cases.
 
 
-```{r data-cleanup-8 }
+```{r process-ebola-data-6 }
 cum_cases <- map(
   by_location, function(case_count) {
   case_count$date <- mdy(case_count$issue_date)
@@ -147,7 +147,7 @@ cum_cases <- map(
 
 ## Merge duplicate alerts
 
-```{r data-cleanup-9 }
+```{r process-ebola-data-7 }
 cols_to_keep <- c(
   "location", "country", "disease", "species",
   "healthmap_alert_id", "headline", "url",
@@ -158,7 +158,7 @@ cols_to_keep <- c(cols_to_keep, "date", "cases")
 
 ```
 
-```{r data-cleanup-10 }
+```{r process-ebola-data-8 }
 
 no_dups <- map(
   cum_cases, ~ merge_duplicates(., cols_to_keep)
@@ -168,7 +168,7 @@ no_dups <- map(
 
 ## Remove outliers. 
 
-```{r data-cleanup-11 }
+```{r process-ebola-data-9 }
 use_last <- 20
 p.within.k <- 0.50
 k_sd <- interval_width_for_p(
@@ -200,7 +200,7 @@ no_outliers <- map(
 
 ## Make monotonically increasing
 
-```{r data-cleanup-12 }
+```{r process-ebola-data-10 }
 
 mono_inc <- map(
   no_outliers, make_monotonically_increasing
@@ -211,7 +211,7 @@ mono_inc <- map(
 ## Interpolate missing data
 Finally, interpolate missing data.
 
-```{r data-cleanup-13 }
+```{r process-ebola-data-11 }
 interpolated <- map(
   mono_inc,
   ~ interpolate_missing_data(., method = "loglinear")
@@ -222,7 +222,7 @@ interpolated <- map(
 Check that each dataframe within interpolated corresponds to daily 
 series.
 
-```{r data-cleanup-14}
+```{r process-ebola-data-12 }
 map(interpolated, function(x) diff(x$date))
 ```
 
@@ -233,7 +233,7 @@ So first we cast the cumulative case counts as integers and then
 take the difference.
 
 
-```{r data-cleanup-15 }
+```{r process-ebola-data-13 }
 
 incid_tall <- map_dfr(interpolated, function(x) {
   x <- select(x,
@@ -255,7 +255,7 @@ incid_tall <- map_dfr(interpolated, function(x) {
 
 Common plotting logic. x must have a date and a cases column.
 
-```{r data-cleanup-17 }
+```{r process-ebola-data-14 }
 
 cases_ts <- function(x) {
   p <- ggplot(x, aes(date, cases)) +
@@ -268,19 +268,19 @@ cases_ts <- function(x) {
 
 ```
 
-```{r data-cleanup-18 }
+```{r process-ebola-data-15 }
 total_p <- map(cum_cases, cases_ts)      
 ```
 
 ### Remove duplicate alerts
 
-```{r data-cleanup-19 }
+```{r process-ebola-data-16 }
 nodups_p <- map(no_dups, cases_ts)
 nooutss_p <- map(no_outliers, cases_ts)
 ```
 ### Make increasing
 
-```{r data-cleanup-21 }
+```{r process-ebola-data-17 }
 
 monoinc_p <- map(mono_inc, cases_ts)
 
@@ -290,7 +290,7 @@ monoinc_p <- map(mono_inc, cases_ts)
 
 This needs a slightly different viz.
 
-```{r data-cleanup-22, eval = TRUE}
+```{r process-ebola-data-18, eval = TRUE}
 
 interp_p <- map(interpolated, function(x) {
   x$interpolated <- FALSE
@@ -323,7 +323,7 @@ interp_p <- map(interpolated, function(x) {
 ```
 ## Daily Incidence Series
 
-```{r data-cleanup-23}
+```{r process-ebola-data-19 }
 daily_bycountry <- split(incid_tall, incid_tall$country)
 
 daily_p <- map(
@@ -349,7 +349,7 @@ daily_p <- map(
 ```
 Putting them together.
 
-```{r data-cleanup-24, eval = TRUE}
+```{r process-ebola-data-20, eval = TRUE}
 
 raw_p[[1]] + total_p[[1]] +
   nodups_p[[1]] + nooutss_p[[1]] +
@@ -383,7 +383,7 @@ The columns we use are : Country, EpiCaseDef (probably),
 DateOnsetInferred and CL_DistrictRes. 
 
 
-```{r who-data-processing-2, eval = TRUE}
+```{r process-ebola-data-21, eval = TRUE}
 who_raw <- read.csv(
   here("data/raw/rstb20160308supp1.csv"),
   colClasses = c(Country = "factor",
@@ -399,7 +399,7 @@ who_raw <- read.csv(
 
 This can be easily accomplished using the `incidence` package.
 
-```{r who-data-processing-3 }
+```{r process-ebola-data-22 }
 who_incid <- split(who_raw, who_raw$Country) %>%
     map_dfr(~ incidence(.x$DateOnsetInferred) %>%
                 as.data.frame,
@@ -413,7 +413,7 @@ who_incid <- rename(
 
 ## Compare daily incidence from ProMED and WHO
 
-```{r}
+```{r process-ebola-data-23}
 daily_incid <- bind_rows(
   WHO = who_incid, ProMED = incid_tall,
   .id = "datasource"
@@ -442,7 +442,7 @@ each country.
 
 Culled from literature.
 
-```{r who-hm-promed-comparison-4, eval = TRUE}
+```{r process-ebola-data-24, eval = TRUE}
 mean_SI <- 14.2
 CV_SI <- 9.6 / 14.2
 SItrunc <- 40
@@ -453,7 +453,7 @@ SI_Distr <- sapply(
 SI_Distr <- SI_Distr / sum(SI_Distr)
 ```
 
-```{r}
+```{r process-ebola-data-25}
 all_groups <- split(
   daily_incid,
   list(
@@ -496,7 +496,7 @@ all_R <- separate(
 
 ```
 
-```{r}
+```{r process-ebola-data-26}
 ggplot(all_R) +
   geom_line(aes(date, `Median(R)`, col = Source)) +
   geom_ribbon(

@@ -19,29 +19,17 @@ fontsize: 11pt
 bibliography: 
 biblio-style: apsr
 endnote: no
-params:
-  datasource: HealthMap
-  infile: data/raw/HealthMap_Ebola_GNE_WHO.csv
-  ofinterest: data/processed/all_african_centroids.csv
 ---
 
-
-```{r data-cleanup-1, include=FALSE}
-opts_chunk$set(
-  dev = "pdf",                      
-  echo = FALSE,
-  warning = FALSE,
-  message = FALSE,
-  fig.path = "figures/"
-)
-```
 
 
 ```{r setup}
 library(dplyr)
+library(EpiEstim)
 library(ggplot2)
 library(ggthemes)
 library(glue)
+library(here)
 library(incidence)
 library(janitor)
 library(lubridate)
@@ -50,9 +38,9 @@ library(purrr)
 library(readr)
 library(scales)
 library(tidyr)
-source("R/merge_dup_lines_DS1.R")
-source("R/incidence_data_cleanup.R")
-source("R/incidence_data_processing.R")
+source(here("R/merge_dup_lines_DS1.R"))
+source(here("R/incidence_data_cleanup.R"))
+source(here("R/incidence_data_processing.R"))
 ```
 
 
@@ -73,7 +61,7 @@ Visualising the raw data.
 ```{r data-cleanup-3 }
 
 feed <- read.csv(
-  "data/raw/promed_2014-2016-renamed.csv",
+  here("data/raw/promed_2014-2016-renamed.csv"),
   stringsAsFactors = FALSE
 ) %>%
   filter(Species == species &
@@ -90,8 +78,8 @@ feed <- rename(feed,
 Strip the date of the time stamp
 
 ```{r data-cleanup-4 }
-feed <- separate(feed,
-  issue_date,
+feed <- separate(
+  feed, issue_date,
   sep = " ",
   into = c("issue_date", "time"),
   remove = TRUE
@@ -396,7 +384,8 @@ DateOnsetInferred and CL_DistrictRes.
 
 
 ```{r who-data-processing-2, eval = TRUE}
-who_raw <- read.csv("data/raw/rstb20160308supp1.csv",
+who_raw <- read.csv(
+  here("data/raw/rstb20160308supp1.csv"),
   colClasses = c(Country = "factor",
                  EpiCaseDef = "character",
                  DateOnsetInferred = "Date",

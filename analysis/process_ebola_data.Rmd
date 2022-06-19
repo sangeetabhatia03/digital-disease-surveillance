@@ -5,7 +5,7 @@ output:
     keep_tex: true
     fig_caption: true
     latex_engine: pdflatex
-title: Cleaning up the feed from HealthMap/ProMED
+title: Cleaning up the feed from ProMED
 author:
 - name: Sangeeta Bhatia
   affiliation: Imperial College London
@@ -42,12 +42,17 @@ library(dplyr)
 library(ggplot2)
 library(ggthemes)
 library(glue)
+library(incidence)
 library(janitor)
 library(lubridate)
+library(patchwork)
 library(purrr)
 library(readr)
 library(scales)
 library(tidyr)
+source("R/merge_dup_lines_DS1.R")
+source("R/incidence_data_cleanup.R")
+source("R/incidence_data_processing.R")
 ```
 
 
@@ -93,11 +98,8 @@ feed <- separate(feed,
 )
 ```
 
-Split the data by country.
 
-```{r data-cleanup-5 }
-by_location <- split(feed, feed$country)
-```
+
 
 ### Raw data by case category
 
@@ -109,9 +111,10 @@ x <- select(feed, issue_date, sc, cc, country) %>%
   )
 
 x$issue_date <- as.Date(x$issue_date, format = "%m/%d/%y")
-p <- ggplot(x, aes(issue_date, count, col = case_type)) +
+raw_p <- split(x, x$country) %>%
+  map(function(x) {
+   p <- ggplot(x, aes(issue_date, count, col = case_type)) +
     geom_point(size = 1.1) +
-    facet_wrap(~country, scales = "free_y", ncol = 1) +
     scale_x_date(date_labels = "%d-%m-%Y") +
     scale_color_manual(
       values = c(sc = "#00BFC4", cc = "#F8766D"),
@@ -123,30 +126,27 @@ p <- ggplot(x, aes(issue_date, count, col = case_type)) +
       panel.border = element_blank(),
       axis.title.x = element_blank(),
       axis.text.x = element_blank(),
-      axis.ticks.x = element_blank(),
       legend.title = element_blank(),
       legend.position = "top"
     )
-  
-p
+   p})
 
 ```
 
 
 # Data clean-up
 
+Split the data by country.
+```{r data-cleanup-5 }
+by_location <- split(feed, feed$country)
+```
+
 Extract the total case count as a sum of suspected and
 confirmed cases.
 
 
 ```{r data-cleanup-8 }
-sum_only_na_stays_na <- function(x){
-  if (all(is.na(x))) out <- NA
-  else out <- sum(x, na.rm = TRUE)
-  out
-}
-
-cum_cases <- map_dfr(
+cum_cases <- map(
   by_location, function(case_count) {
   case_count$date <- mdy(case_count$issue_date)
   case_count$cases <- apply(
@@ -171,32 +171,11 @@ cols_to_keep <- c(cols_to_keep, "date", "cases")
 ```
 
 ```{r data-cleanup-10 }
-no_dups <- merge_duplicates(cum_cases, cols_to_keep)
-```
-## Compare before and after removal of duplicates
 
-```{r}
-x <- bind_rows(
-  list("Without duplicates" = no_dups[, c("date","country", "cases")],
-       "With duplicates" = cum_cases[, c("date","country", "cases")]),
-  .id = "var"
+no_dups <- map(
+  cum_cases, ~ merge_duplicates(., cols_to_keep)
 )
-p <- ggplot(x, aes(date, cases, col = var)) +
-    geom_point() +
-    facet_wrap(~country, scales = "free_y", ncol = 1) +
-    scale_x_date(date_labels = "%d-%m-%Y") +
-  ylab("Cases")
 
-p <- p + theme_minimal() +
-  theme(
-    panel.border = element_blank(),
-    axis.title.x = element_blank(),
-    axis.text.x = element_blank(),
-    axis.ticks.x = element_blank(),
-    legend.title = element_blank(),
-    legend.position = "top"
-  )
-p
 ```
 
 ## Remove outliers. 
@@ -204,35 +183,40 @@ p
 ```{r data-cleanup-11 }
 use_last <- 20
 p.within.k <- 0.50
-k_sd <- mRIIDS:::interval_width_for_p(
+k_sd <- interval_width_for_p(
   use_last,
   1 - p.within.k
 ) %>%
   sqrt() %>%
   `[`(2)
 
-no_outliers <- map(no_dups, function(df) {
+no_outliers <- map(
+  no_dups, function(df) {
   df <- arrange(df, date)
-  df <- filter(df, !is.na(cases)) %>% select(date, cases)
+  df <- filter(df, !is.na(cases)) %>%
+    select(date, cases)
   if (nrow(df) == 0) {
     return(NULL)
   } else {
-    df <- mRIIDS:::remove_last_outliers(df,
+    df <- remove_last_outliers(df,
       use_last = use_last,
       k_sd = k_sd
     )
   }
   message(df$country[1])
   df
-})
+  })
+
+
 ```
 
 ## Make monotonically increasing
 
 ```{r data-cleanup-12 }
 
-mono_inc <- split(no_dups, no_dups$country) %>%
-  map(make_monotonically_increasing)
+mono_inc <- map(
+  no_outliers, make_monotonically_increasing
+)
 
 ```
 
@@ -297,29 +281,20 @@ cases_ts <- function(x) {
 ```
 
 ```{r data-cleanup-18 }
-total_p <- cases_ts(cum_cases) +
-  facet_wrap(~country, scales = "free_y", ncol = 1) + 
-  theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
-    
+total_p <- map(cum_cases, cases_ts)      
 ```
 
 ### Remove duplicate alerts
 
 ```{r data-cleanup-19 }
-nodups_p <- cases_ts(no_dups) +
-  facet_wrap(~country, scales = "free_y", ncol = 1) + 
-  theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
-
+nodups_p <- map(no_dups, cases_ts)
+nooutss_p <- map(no_outliers, cases_ts)
 ```
 ### Make increasing
 
 ```{r data-cleanup-21 }
+
 monoinc_p <- map(mono_inc, cases_ts)
-monoinc_p <- map(
-  monoinc_p, function(p) {
-    p <- p + theme(axis.text.x = element_text(hjust = 0.5))
-    p
-})     
 
 ```
 
@@ -330,25 +305,30 @@ This needs a slightly different viz.
 ```{r data-cleanup-22, eval = TRUE}
 
 interp_p <- map(interpolated, function(x) {
-  x$src <- glue("{datasource}.FALSE")
+  x$interpolated <- FALSE
   idx <- which(is.na(x$cases))
-  x$src[idx] <- glue("{datasource}.TRUE")
+  x$interpolated[idx] <- TRUE
   x <- select(x,
     date = interpolated_date,
     cases = interpolated_cases,
-    src
+    interpolated
   )
-  p <- ggplot(x, aes(date, cases, col = src)) + geom_point(size = 0.5)
-  p <- p + xlab("") + ylab("Cases") 
+  x$alpha <- 0.8
+  x$alpha[idx] <- 0.4
+  p <- ggplot(x, aes(date, cases, alpha = alpha)) + geom_point(size = 0.5, position = position_jitter(width=0.1))
+  p <- p + ylab("Cases")
+  p <- p + scale_x_date(date_labels = "%d-%b-%Y")
+  p <- p +
+    scale_alpha_identity()
   p <- p + theme_minimal()
   p <- p + theme(
+    axis.title.x = element_blank(),
     axis.text.x = element_text(hjust = 0.5),
     panel.border = element_blank(),
     axis.line = element_line(),
-    legend.position = "top"
+    legend.position = "top",
+    legend.title = element_blank()    
   )
-  p <- p + xlab("") + theme(legend.title = element_blank())
-  p <- p + scale_x_date(date_labels = "%d-%b-%Y")
   p
 })
 
@@ -358,19 +338,16 @@ interp_p <- map(interpolated, function(x) {
 ```{r data-cleanup-23}
 daily_bycountry <- split(incid_tall, incid_tall$country)
 
-names(daily_bycountry) <- countrycode::countrycode(
-  names(daily_bycountry), "iso3c", "country.name"
-)
-
 daily_p <- map(
     daily_bycountry,
     function(df) {
       p <- ggplot(df, aes(date, incid)) +
         geom_point(size = 0.5)
-      p <- p + xlab("") + ylab("Daily incidence")
+      p <- p + ylab("Daily incidence")
       p <- p + theme_minimal()
       p <- p +
         theme(
+          axis.title.x = element_blank(),          
           axis.text.x = element_text(hjust = 0.5),
           panel.border = element_blank(),
           axis.line = element_line()
@@ -386,364 +363,166 @@ Putting them together.
 
 ```{r data-cleanup-24, eval = TRUE}
 
-countries <- names(by_location)
-graphs <- list(
-  raw_p,
-  total_p,
-  nodups_p,
-  nooutss_p,
-  monoinc_p,
-  interp_p,
-  daily_p
+raw_p[[1]] + total_p[[1]] +
+  nodups_p[[1]] + nooutss_p[[1]] +
+  monoinc_p[[1]] + interp_p[[1]] +
+  daily_p[[1]] +
+  plot_layout(ncol = 2)
+
+```
+
+## Processing data collated by the World Health Organization
+
+We will also use the West African Ebola incidence data collated by the WHO
+during the epidemic which was made available ~1 year after the end of
+the epidemic [here](https://doi.org/10.1098%2Frstb.2016.0308).
+
+The cleaned version of the WHO data consisted of cases reported
+between December 2013 and October 2015 in the three most affected
+countries - Guinea, Sierra Leone and Liberia. 
+
+The pre-processing steps consist of turning the line count into a
+daily incidence series and turning the given tall data into wide data.
+
+The current data set has three possible values for the epidemiological
+case definition - confirmed, probable and suspected.
+Epidemiological case definition of probable and suspected cases
+differed across countries while confirmed cases were the ones
+confirmed through lab report. For the purpose of the current analysis,
+one approach could be to lump all of them together. The inferred date of
+onset (rather than the date reported) is used for estimation.
+The columns we use are : Country, EpiCaseDef (probably),
+DateOnsetInferred and CL_DistrictRes. 
+
+
+```{r who-data-processing-2, eval = TRUE}
+who_raw <- read.csv("data/raw/rstb20160308supp1.csv",
+  colClasses = c(Country = "factor",
+                 EpiCaseDef = "character",
+                 DateOnsetInferred = "Date",
+                 CL_DistrictRes = "factor")) %>%
+  select(Country, EpiCaseDef,
+         DateOnsetInferred,CL_DistrictRes)
+
+```
+
+## Line-list to incidence time series
+
+This can be easily accomplished using the `incidence` package.
+
+```{r who-data-processing-3 }
+who_incid <- split(who_raw, who_raw$Country) %>%
+    map_dfr(~ incidence(.x$DateOnsetInferred) %>%
+                as.data.frame,
+            .id = "country")
+who_incid <- rename(
+  who_incid, "date" = "dates",
+  incid = "counts"
+)
+```
+
+
+## Compare daily incidence from ProMED and WHO
+
+```{r}
+daily_incid <- bind_rows(
+  WHO = who_incid, ProMED = incid_tall,
+  .id = "datasource"
 )
 
-walk(
-    countries,
-    function(c) {
-        cspecific <- map(graphs, ~ .x[[c]])
-        names(cspecific) <- 1:length(cspecific)
-        iwalk(
-            cspecific,
-            function(p, idx) {
-                filename <- here::here(
-                   all_files[[datasource]]$outdir, 
-                   glue("{outfile}_{c}_{idx}.pdf")
-                   )
-                ggplot2::ggsave(
-                    plot = p,
-                    filename = filename,
-                    width = mriids_plot_theme$single_col_width,
-                    height = mriids_plot_theme$single_col_height,
-                    units = mriids_plot_theme$units
-                )                
-                
-            }    
-        )
-    }
+ggplot(
+  daily_incid, aes(date, incid, col = datasource)
+) +
+  geom_point(size = 0.5) +
+  facet_wrap(~country, ncol = 1, scales = "free_y") +
+  scale_x_date(date_labels = "%d-%B-%Y") +
+  theme_minimal() +
+  theme(
+    axis.title.x = element_blank(),
+    legend.position = "top",
+    legend.title = element_blank()
   )
 
-
-
 ```
 
+## Estimating reproduction number from ProMED and WHO Data
+We will use [EpiEstim](https://doi.org/10.1093/aje/kwt133) to estimate
+the effective reproduction number using data from both sources for
+each country.
+# Parameters for Ebola
 
-Also, get rid of the first row of all 0s to get Stan started.
+Culled from literature.
 
-```{r data-cleanup-25 }
-
-incid_tall <- filter(
-  incid_tall,
-  date != "2014-03-21"
+```{r who-hm-promed-comparison-4, eval = TRUE}
+mean_SI <- 14.2
+CV_SI <- 9.6 / 14.2
+SItrunc <- 40
+SI_Distr <- sapply(
+  0:SItrunc,
+  function(e) DiscrSI(e, mean_SI, mean_SI * CV_SI)
 )
-```
-And reshape.
-
-```{r data-cleanup-26 }
-incid_wide <- tidyr::spread(incid_tall, country, incid, fill = 0)
+SI_Distr <- SI_Distr / sum(SI_Distr)
 ```
 
-
-## Add 0 incidence for other countries
-
-Finally, we add 0 incidence for all countries other than ones for
-which we already have data. 
-
-```{r data-cleanup-27 }
-ofinterest <- readr::read_csv(here::here(params$ofinterest)) %>%
-  filter(include == "TRUE")
-
-nodata <- setdiff(
-  ofinterest$ISO3,
-  countrycode::countrycode(
-    wafrica,
-    "country.name",
-    "iso3c"
+```{r}
+all_groups <- split(
+  daily_incid,
+  list(
+    daily_incid$datasource,
+    daily_incid$country
   )
 )
-df <- matrix(0,
-  nrow = nrow(incid_wide),
-  ncol = length(nodata)
-)
-colnames(df) <- nodata
-df <- data.frame(df)
-incid_wide_all <- cbind(incid_wide, df)
-```
 
-Finally ensure that the order of countries in centroids and incid 
-files is the same.
+time_window <- 14
 
-```{r data-cleanup-28, eval = TRUE}
-inorder <- ofinterest$ISO3
-## Some of the countries of interest may not be present in
-## incid_wide_all
-inorder <- intersect(inorder, colnames(incid_wide_all))
-incid_wide_all <- select(
-  incid_wide_all,
-  date,
-  inorder
-)
-```
-
-
-## Write the output
-
-```{r data-cleanup-29 }
-
-
-
-  readr::write_csv(
-    x = incid_wide_all,
-    path = here::here(
-        all_files[[datasource]]$outdir,
-        glue("{outfile}_wide.csv")
+all_R <- map_dfr(
+  all_groups,
+  function(x) {
+    I <- x$incid
+    start <- 2:(nrow(x) - time_window)
+    end <- start + time_window
+    res <- EstimateR(
+      I,
+      T.Start = start,
+      T.End = end,
+      method = "NonParametricSI",
+      SI.Distr = SI_Distr,
+      plot = FALSE,
+      CV.Posterior = 1,
+      Mean.Prior = 1,
+      Std.Prior = 0.5
     )
+    res$R$date <- x$date[end]
+    res$R},
+  .id = "source.country"
+)
+
+all_R <- separate(
+  all_R,
+  source.country,
+  into = c("Source", "country"),
+  extra = "merge",
+  fill = "left"
+)
+
+```
+
+```{r}
+ggplot(all_R) +
+  geom_line(aes(date, `Median(R)`, col = Source)) +
+  geom_ribbon(
+    aes(date, ymin = `Quantile.0.025(R)`,
+        ymax = `Quantile.0.975(R)`, fill = Source),
+    alpha = 0.4
+  ) +
+    facet_wrap(~country, ncol = 1, scales = "free_y") +
+  scale_x_date(date_labels = "%d-%B-%Y") +
+  theme_minimal() +
+  theme(
+    axis.title.x = element_blank(),
+    legend.position = "top",
+    legend.title = element_blank()
   )
-```
- 
-## Also make note of what points were interpolated.
 
-```{r data-cleanup-30 }
-incid_extracols <- map_dfr(
-  interpolated, function(x) {
-  idx <- which(is.na(x$cases))
-  x$interpolated <- "FALSE"
-  x$interpolated[idx] <- "TRUE"
-
-  x <- select(
-    x,
-    date,
-    interpolated
-  )
-},
-.id = "country"
-)
-
-incid_extracols$country <- countrycode::countrycode(
-  incid_extracols$country,
-  "country.name",
-  "iso3c"
-)
-```
-
-Reshaping from tall to wide and back to tall allows us to get the same
-dates for all countries. We do this for both data frames and then 
-join the tall forms of both.
-
-```{r data-cleanup-31}
-incid_tall <- tidyr::gather(
-    data = incid_wide,
-    key = country,
-    value = incid,
-    -date
-)
-## Check
-## group_by(incid_tall, country) %>% summarise(n = n())
-# A tibble: 6 x 2
-##   country     n
-##   <chr>   <int>
-## 1 GIN       656
-## 2 LBR       656
-## 3 MLI       656
-## 4 NGA       656
-## 5 SEN       656
-## 6 SLE       656
-
-## When reshaping to wide, we get NAs for dates for which
-## we don't have data for a given country. This we had set to 0 in
-## reshaping incid; So we set interpolated to FALSE for these dates.
-out <- tidyr::spread(
-    incid_extracols,
-    country,
-    interpolated,
-    fill = FALSE
-    )
-## Reshaping back to tall
-incid_extracols <- tidyr::gather(
-    data = out,
-    key = country,
-    value = interpolated,
-    -date
-  )    
-## Check
-## group_by(incid_extracols, country) %>% summarise(n = n())
-# A tibble: 6 x 2
-##   country     n
-##   <chr>   <int>
-## 1 GIN       657
-## 2 LBR       657
-## 3 MLI       657
-## 4 NGA       657
-## 5 SEN       657
-## 6 SLE       657
-
-```
-Now we can join the two.
-
-```{r data-cleanup-32 }
-## dim(incid_tall) 2310    3
-## dim(incid_extracols) 2311    3
-## The 1 row (Ghana) that we deleted from incid_tall
-incid_tall <- left_join(
-    incid_tall,
-    incid_extracols
-    )
-## group_by(incid_tall, country) %>% summarise(n = n())
-# A tibble: 6 x 2
-##   country     n
-##   <chr>   <int>
-## 1 GIN       656
-## 2 LBR       656
-## 3 MLI       656
-## 4 NGA       656
-## 5 SEN       656
-## 6 SLE       656
-## This should not have introduced NAs. 
-## incid_tall[!complete.cases(incid_tall), ]
-## [1] country      date         incid        interpolated
-## <0 rows> (or 0-length row.names)
-
-```
-
-
-```{r data-cleanup-33 }
-## This is wrong; see notes
-## incid_extracols <- left_join(
-##   incid_tall,
-##   incid_extracols,
-##   by = c(
-##     "date",
-##     "country"
-##   )
-##)
-
-df <- cbind(date = incid_wide_all$date, df)
-df_tall <- tidyr::gather(
-  df,
-  country,
-  incid,
-  -date
-)
-## group_by(df_tall, country) %>% summarise(n = n()) %>% filter(n != 656)
-## A tibble: 0 x 2
-## … with 2 variables: country <chr>, n <int>
-
-## By the same logic as before, we set the flag to FALSE for these
-## countries.
-
-df_tall$interpolated <- FALSE
-
-incid_tall <- rbind(
-  incid_tall,
-  df_tall
-)
-
-## group_by(incid_tall, country) %>% summarise(n = n()) %>% filter(n != 656)
-## # A tibble: 0 x 2
-## # … with 2 variables: country <chr>, n <int>
-
-## This should not have introduced NAs. 
-## incid_tall[!complete.cases(incid_tall), ]
-## [1] country      date         incid        interpolated
-## <0 rows> (or 0-length row.names)
-
-
-
-
-readr::write_csv(
-    x = incid_tall,
-    path = here::here(
-        all_files[[datasource]]$outdir,
-        glue("{outfile}_tall.csv")
-    ) 
-  )
-```
-
-## Weekly series
-
-Add a flag to indicate if all points in the week were reconstructed.
-
-```{r data-cleanup-34 }
-
-## No NAs at this point
-## incid_extracols[is.na(incid_extracols$incid), ]
-
-## Not all countries have the same number of rows.
-## group_by(incid_extracols, country) %>% summarise(n()) %>% filter(`n()` != 656)
-# A tibble: 6 x 2
-##   country `n()`
-##   <chr>   <int>
-## 1 GIN       584
-## 2 LBR       566
-## 3 MLI        70
-## 4 NGA       531
-## 5 SEN        69
-## 6 SLE       490
-## Essentailly we had the following number of 0 incidence rows missing from our
-## analysis for sensitivity and specificity.
-##   country      newcols
-##   <chr>          <dbl>
-## 1 Guinea            71
-## 2 Liberia           90
-## 3 Mali             586
-## 4 Nigeria          125
-## 5 Senegal          587
-## 6 Sierra Leone     166
-
-## Why work on incid_extracols? This will lead to missing all those
-## other countries we added.
-extra <- as.numeric(max(incid_tall$date) -
-  min(incid_tall$date)) %% 7
-
-
-dates <- unique(sort(incid_tall$date))
   
-
-remove <- tail(dates, extra)
-
-daily <- filter(
-  incid_tall,
-  !(date %in% remove)
-)
-daily$interpolated <- as.logical(daily$interpolated)
-## Check for NAs
-## any(is.na(daily$interpolated))
-weeks <- cut(daily$date, breaks = "7 days")
-weekly <- split(daily, weeks) %>%
-  map_dfr(~ group_by(
-    .x,
-    country
-  ) %>%
-    summarise(
-      incid = sum(incid),
-      interpolated = all(interpolated)
-    ),
-  .id = "date"
-  )
-## weekly[!complete.cases(weekly), ]
-## group_by(weekly, country) %>% summarise(n()) %>% filter(`n()` != 94)
-## A tibble: 0 x 2
-## … with 2 variables: country <chr>, `n()` <int>
-## Check that the numbers look ok.
-
-
-
-readr::write_csv(
-  x = weekly,
-  path = here::here(
-    all_files[[datasource]]$outdir,
-    glue("{outfile}_weekly.csv")
-  )
-)
-
-outfile <- paste0(outfile, "_no_dups.csv")
-
-bind_rows(no_dups) %>%
-  select(country, date, cases) %>%
-  readr::write_csv(
-  path = here::here(
-    all_files[[datasource]]$outdir,
-    glue("{outfile}_no_dups.csv")
-  )
- )
-
 ```

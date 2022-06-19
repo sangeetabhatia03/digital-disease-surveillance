@@ -2,6 +2,12 @@ paste_single_col <- function(col_dup) {
   paste(col_dup, collapse = " / ")
 }
 
+sum_only_na_stays_na <- function(x){
+  if (all(is.na(x))) out <- NA
+  else out <- sum(x, na.rm = TRUE)
+  out
+}
+
 #' Merge duplicated lines from data stream 1
 #'
 #' This function BLABLA

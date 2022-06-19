@@ -65,8 +65,8 @@ feed <- read.csv(
   stringsAsFactors = FALSE
 ) %>%
   filter(Species == species &
-         Disease == disease &
-         Country %in% wafrica)
+    Disease == disease &
+    Country %in% wafrica)
 
 feed <- clean_names(feed)
 ## Janitor renames healthmap to health_map. Fix.
@@ -101,24 +101,25 @@ x <- select(feed, issue_date, sc, cc, country) %>%
 x$issue_date <- as.Date(x$issue_date, format = "%m/%d/%y")
 raw_p <- split(x, x$country) %>%
   map(function(x) {
-   p <- ggplot(x, aes(issue_date, count, col = case_type)) +
-    geom_point(size = 1.1) +
-    scale_x_date(date_labels = "%d-%m-%Y") +
-    scale_color_manual(
-      values = c(sc = "#00BFC4", cc = "#F8766D"),
-      breaks = c("sc", "cc"),
-      labels = c("Suspected Cases", "Confirmed Cases")
-    ) + ylab("Cases") 
-  p <- p + theme_minimal() +
-    theme(
-      panel.border = element_blank(),
-      axis.title.x = element_blank(),
-      axis.text.x = element_blank(),
-      legend.title = element_blank(),
-      legend.position = "top"
-    )
-   p})
-
+    p <- ggplot(x, aes(issue_date, count, col = case_type)) +
+      geom_point(size = 1.1) +
+      scale_x_date(date_labels = "%d-%m-%Y") +
+      scale_color_manual(
+        values = c(sc = "#00BFC4", cc = "#F8766D"),
+        breaks = c("sc", "cc"),
+        labels = c("Suspected Cases", "Confirmed Cases")
+      ) +
+      ylab("Cases")
+    p <- p + theme_minimal() +
+      theme(
+        panel.border = element_blank(),
+        axis.title.x = element_blank(),
+        axis.text.x = element_blank(),
+        legend.title = element_blank(),
+        legend.position = "top"
+      )
+    p
+  })
 ```
 
 
@@ -136,13 +137,13 @@ confirmed cases.
 ```{r process-ebola-data-6 }
 cum_cases <- map(
   by_location, function(case_count) {
-  case_count$date <- mdy(case_count$issue_date)
-  case_count$cases <- apply(
-    case_count[, c("sc", "cc")], 1, sum_only_na_stays_na
-  )
-  case_count
-})
-
+    case_count$date <- mdy(case_count$issue_date)
+    case_count$cases <- apply(
+      case_count[, c("sc", "cc")], 1, sum_only_na_stays_na
+    )
+    case_count
+  }
+)
 ```
 
 ## Merge duplicate alerts
@@ -155,7 +156,6 @@ cols_to_keep <- c(
 )
 ## These are columns we generate ourselves later on
 cols_to_keep <- c(cols_to_keep, "date", "cases")
-
 ```
 
 ```{r process-ebola-data-8 }
@@ -163,7 +163,6 @@ cols_to_keep <- c(cols_to_keep, "date", "cases")
 no_dups <- map(
   cum_cases, ~ merge_duplicates(., cols_to_keep)
 )
-
 ```
 
 ## Remove outliers. 
@@ -180,22 +179,21 @@ k_sd <- interval_width_for_p(
 
 no_outliers <- map(
   no_dups, function(df) {
-  df <- arrange(df, date)
-  df <- filter(df, !is.na(cases)) %>%
-    select(date, cases)
-  if (nrow(df) == 0) {
-    return(NULL)
-  } else {
-    df <- remove_last_outliers(df,
-      use_last = use_last,
-      k_sd = k_sd
-    )
+    df <- arrange(df, date)
+    df <- filter(df, !is.na(cases)) %>%
+      select(date, cases)
+    if (nrow(df) == 0) {
+      return(NULL)
+    } else {
+      df <- remove_last_outliers(df,
+        use_last = use_last,
+        k_sd = k_sd
+      )
+    }
+    message(df$country[1])
+    df
   }
-  message(df$country[1])
-  df
-  })
-
-
+)
 ```
 
 ## Make monotonically increasing
@@ -205,7 +203,6 @@ no_outliers <- map(
 mono_inc <- map(
   no_outliers, make_monotonically_increasing
 )
-
 ```
 
 ## Interpolate missing data
@@ -245,7 +242,6 @@ incid_tall <- map_dfr(interpolated, function(x) {
   x <- select(x, date, incid)
   x
 }, .id = "country")
-
 ```
 
 ## Plot
@@ -265,11 +261,10 @@ cases_ts <- function(x) {
   p <- p + scale_x_date(date_labels = "%d-%b-%Y")
   p
 }
-
 ```
 
 ```{r process-ebola-data-15 }
-total_p <- map(cum_cases, cases_ts)      
+total_p <- map(cum_cases, cases_ts)
 ```
 
 ### Remove duplicate alerts
@@ -283,7 +278,6 @@ nooutss_p <- map(no_outliers, cases_ts)
 ```{r process-ebola-data-17 }
 
 monoinc_p <- map(mono_inc, cases_ts)
-
 ```
 
 ### Interpolated data
@@ -303,7 +297,8 @@ interp_p <- map(interpolated, function(x) {
   )
   x$alpha <- 0.8
   x$alpha[idx] <- 0.4
-  p <- ggplot(x, aes(date, cases, alpha = alpha)) + geom_point(size = 0.5, position = position_jitter(width=0.1))
+  p <- ggplot(x, aes(date, cases, alpha = alpha)) +
+    geom_point(size = 0.5, position = position_jitter(width = 0.1))
   p <- p + ylab("Cases")
   p <- p + scale_x_date(date_labels = "%d-%b-%Y")
   p <- p +
@@ -315,11 +310,10 @@ interp_p <- map(interpolated, function(x) {
     panel.border = element_blank(),
     axis.line = element_line(),
     legend.position = "top",
-    legend.title = element_blank()    
+    legend.title = element_blank()
   )
   p
 })
-
 ```
 ## Daily Incidence Series
 
@@ -327,25 +321,23 @@ interp_p <- map(interpolated, function(x) {
 daily_bycountry <- split(incid_tall, incid_tall$country)
 
 daily_p <- map(
-    daily_bycountry,
-    function(df) {
-      p <- ggplot(df, aes(date, incid)) +
-        geom_point(size = 0.5)
-      p <- p + ylab("Daily incidence")
-      p <- p + theme_minimal()
-      p <- p +
-        theme(
-          axis.title.x = element_blank(),          
-          axis.text.x = element_text(hjust = 0.5),
-          panel.border = element_blank(),
-          axis.line = element_line()
-        )
-      p <- p + scale_x_date(date_labels = "%d-%b-%Y")
-      p
-
-    }    
+  daily_bycountry,
+  function(df) {
+    p <- ggplot(df, aes(date, incid)) +
+      geom_point(size = 0.5)
+    p <- p + ylab("Daily incidence")
+    p <- p + theme_minimal()
+    p <- p +
+      theme(
+        axis.title.x = element_blank(),
+        axis.text.x = element_text(hjust = 0.5),
+        panel.border = element_blank(),
+        axis.line = element_line()
+      )
+    p <- p + scale_x_date(date_labels = "%d-%b-%Y")
+    p
+  }
 )
-
 ```
 Putting them together.
 
@@ -356,7 +348,6 @@ raw_p[[1]] + total_p[[1]] +
   monoinc_p[[1]] + interp_p[[1]] +
   daily_p[[1]] +
   plot_layout(ncol = 2)
-
 ```
 
 ## Processing data collated by the World Health Organization
@@ -386,13 +377,17 @@ DateOnsetInferred and CL_DistrictRes.
 ```{r process-ebola-data-21, eval = TRUE}
 who_raw <- read.csv(
   here("data/raw/rstb20160308supp1.csv"),
-  colClasses = c(Country = "factor",
-                 EpiCaseDef = "character",
-                 DateOnsetInferred = "Date",
-                 CL_DistrictRes = "factor")) %>%
-  select(Country, EpiCaseDef,
-         DateOnsetInferred,CL_DistrictRes)
-
+  colClasses = c(
+    Country = "factor",
+    EpiCaseDef = "character",
+    DateOnsetInferred = "Date",
+    CL_DistrictRes = "factor"
+  )
+) %>%
+  select(
+    Country, EpiCaseDef,
+    DateOnsetInferred, CL_DistrictRes
+  )
 ```
 
 ## Line-list to incidence time series
@@ -401,11 +396,13 @@ This can be easily accomplished using the `incidence` package.
 
 ```{r process-ebola-data-22 }
 who_incid <- split(who_raw, who_raw$Country) %>%
-    map_dfr(~ incidence(.x$DateOnsetInferred) %>%
-                as.data.frame,
-            .id = "country")
+  map_dfr(~ incidence(.x$DateOnsetInferred) %>%
+    as.data.frame(),
+  .id = "country"
+  )
 who_incid <- rename(
-  who_incid, "date" = "dates",
+  who_incid,
+  "date" = "dates",
   incid = "counts"
 )
 ```
@@ -431,7 +428,6 @@ ggplot(
     legend.position = "top",
     legend.title = element_blank()
   )
-
 ```
 
 ## Estimating reproduction number from ProMED and WHO Data
@@ -482,7 +478,8 @@ all_R <- map_dfr(
       Std.Prior = 0.5
     )
     res$R$date <- x$date[end]
-    res$R},
+    res$R
+  },
   .id = "source.country"
 )
 
@@ -493,18 +490,19 @@ all_R <- separate(
   extra = "merge",
   fill = "left"
 )
-
 ```
 
 ```{r process-ebola-data-26}
 ggplot(all_R) +
   geom_line(aes(date, `Median(R)`, col = Source)) +
   geom_ribbon(
-    aes(date, ymin = `Quantile.0.025(R)`,
-        ymax = `Quantile.0.975(R)`, fill = Source),
+    aes(date,
+      ymin = `Quantile.0.025(R)`,
+      ymax = `Quantile.0.975(R)`, fill = Source
+    ),
     alpha = 0.4
   ) +
-    facet_wrap(~country, ncol = 1, scales = "free_y") +
+  facet_wrap(~country, ncol = 1, scales = "free_y") +
   scale_x_date(date_labels = "%d-%B-%Y") +
   theme_minimal() +
   theme(
@@ -512,6 +510,4 @@ ggplot(all_R) +
     legend.position = "top",
     legend.title = element_blank()
   )
-
-  
 ```

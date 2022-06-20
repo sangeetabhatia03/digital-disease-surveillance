@@ -41,6 +41,7 @@ library(tidyr)
 source(here("R/merge_dup_lines_DS1.R"))
 source(here("R/incidence_data_cleanup.R"))
 source(here("R/incidence_data_processing.R"))
+
 ```
 
 
@@ -55,7 +56,6 @@ outfile <- glue(
 ```
 
 Visualising the raw data.
-
 
 
 ```{r process-ebola-data-2 }
@@ -87,20 +87,18 @@ feed <- separate(
 ```
 
 
-
-
 ### Raw data by case category
 
 ```{r process-ebola-data-4 }
-## Deaths are not used anywhere. No use plotting them
 x <- select(feed, issue_date, sc, cc, country) %>%
   gather(
     case_type, count, -c(issue_date, country)
   )
 
 x$issue_date <- as.Date(x$issue_date, format = "%m/%d/%y")
+
 raw_p <- split(x, x$country) %>%
-  map(function(x) {
+  imap(function(x, country) {
     p <- ggplot(x, aes(issue_date, count, col = case_type)) +
       geom_point(size = 1.1) +
       scale_x_date(date_labels = "%d-%m-%Y") +
@@ -109,7 +107,8 @@ raw_p <- split(x, x$country) %>%
         breaks = c("sc", "cc"),
         labels = c("Suspected Cases", "Confirmed Cases")
       ) +
-      ylab("Cases")
+      ylab("Cases") +
+      ggtitle(country)
     p <- p + theme_minimal() +
       theme(
         panel.border = element_blank(),
@@ -120,6 +119,8 @@ raw_p <- split(x, x$country) %>%
       )
     p
   })
+
+
 ```
 
 
@@ -135,6 +136,7 @@ confirmed cases.
 
 
 ```{r process-ebola-data-6 }
+
 cum_cases <- map(
   by_location, function(case_count) {
     case_count$date <- mdy(case_count$issue_date)
@@ -144,6 +146,7 @@ cum_cases <- map(
     case_count
   }
 )
+
 ```
 
 ## Merge duplicate alerts
@@ -159,7 +162,6 @@ cols_to_keep <- c(cols_to_keep, "date", "cases")
 ```
 
 ```{r process-ebola-data-8 }
-
 no_dups <- map(
   cum_cases, ~ merge_duplicates(., cols_to_keep)
 )
@@ -194,6 +196,7 @@ no_outliers <- map(
     df
   }
 )
+
 ```
 
 ## Make monotonically increasing
@@ -209,10 +212,12 @@ mono_inc <- map(
 Finally, interpolate missing data.
 
 ```{r process-ebola-data-11 }
+
 interpolated <- map(
   mono_inc,
   ~ interpolate_missing_data(., method = "loglinear")
 )
+
 ```
 
 
@@ -242,10 +247,10 @@ incid_tall <- map_dfr(interpolated, function(x) {
   x <- select(x, date, incid)
   x
 }, .id = "country")
+
 ```
 
 ## Plot
-
 
 ### Total cases as sum of sc and cc.
 
@@ -261,6 +266,7 @@ cases_ts <- function(x) {
   p <- p + scale_x_date(date_labels = "%d-%b-%Y")
   p
 }
+
 ```
 
 ```{r process-ebola-data-15 }
@@ -276,7 +282,6 @@ nooutss_p <- map(no_outliers, cases_ts)
 ### Make increasing
 
 ```{r process-ebola-data-17 }
-
 monoinc_p <- map(mono_inc, cases_ts)
 ```
 
@@ -348,6 +353,8 @@ raw_p[[1]] + total_p[[1]] +
   monoinc_p[[1]] + interp_p[[1]] +
   daily_p[[1]] +
   plot_layout(ncol = 2)
+
+
 ```
 
 ## Processing data collated by the World Health Organization
@@ -400,11 +407,11 @@ who_incid <- split(who_raw, who_raw$Country) %>%
     as.data.frame(),
   .id = "country"
   )
+
 who_incid <- rename(
-  who_incid,
-  "date" = "dates",
-  incid = "counts"
+  who_incid, "date" = "dates", incid = "counts"
 )
+
 ```
 
 
@@ -428,12 +435,15 @@ ggplot(
     legend.position = "top",
     legend.title = element_blank()
   )
+
 ```
 
 ## Estimating reproduction number from ProMED and WHO Data
+
 We will use [EpiEstim](https://doi.org/10.1093/aje/kwt133) to estimate
 the effective reproduction number using data from both sources for
 each country.
+
 # Parameters for Ebola
 
 Culled from literature.
@@ -490,9 +500,11 @@ all_R <- separate(
   extra = "merge",
   fill = "left"
 )
+
 ```
 
 ```{r process-ebola-data-26}
+
 ggplot(all_R) +
   geom_line(aes(date, `Median(R)`, col = Source)) +
   geom_ribbon(
@@ -502,6 +514,7 @@ ggplot(all_R) +
     ),
     alpha = 0.4
   ) +
+  geom_hline(yintercept = 1, col = "red", linetype = "dashed") +
   facet_wrap(~country, ncol = 1, scales = "free_y") +
   scale_x_date(date_labels = "%d-%B-%Y") +
   theme_minimal() +
@@ -510,4 +523,5 @@ ggplot(all_R) +
     legend.position = "top",
     legend.title = element_blank()
   )
+
 ```

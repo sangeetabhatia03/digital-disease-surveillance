@@ -8,7 +8,7 @@ disease surveillance data.
 ## Data 
 ### Ebola
 
-The first motivating example comes from the 2013–2016 West African
+Our motivating example comes from the 2013–2016 West African
 Ebola epidemic. We will use two Ebola data sets:
 - curated ProMED and HealthMap records on the human cases of Ebola
    Virus Disease in West Africa;
